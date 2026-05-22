@@ -1,0 +1,95 @@
+baseURL: "https://christianyang37.github.io/blog/"
+title: "Christian's Blog"
+theme: "PaperModX"
+defaultContentLanguage: "en"
+enableRobotsTXT: true
+enableEmoji: true
+pagination:
+  pagerSize: 10
+
+outputs:
+  home:
+    - HTML
+    - RSS
+    - JSON
+
+minify:
+  disableXML: true
+
+markup:
+  goldmark:
+    renderer:
+      unsafe: true
+  highlight:
+    style: dracula
+    lineNos: false
+    noClasses: false
+
+taxonomies:
+  category: categories
+  tag: tags
+
+params:
+  env: production
+  description: "Notes on machine learning, AI safety, and deep learning theory."
+  author: "Chiwun Yang"
+  mainSections:
+    - posts
+  defaultTheme: auto
+  ShowReadingTime: true
+  ShowWordCount: true
+  ShowShareButtons: false
+  ShowBreadCrumbs: true
+  ShowCodeCopyButtons: true
+  ShowToc: true
+  TocOpen: false
+  TocSide: "right"
+  ShowPostNavLinks: true
+  EnableInstantClick: true
+  EnableImageZoom: true
+  DateFormat: "2006-01-02"
+
+  math: true
+
+  homeInfoParams:
+    Title: "Hi, I'm Chiwun 👋"
+    Content: |
+      Welcome to my blog. I write about machine learning research, AI safety,
+      and deep learning theory.
+
+      ← Back to [my homepage](https://christianyang37.github.io/) for academic profile, publications, and CV.
+
+  socialIcons:
+    - name: github
+      url: "https://github.com/ChristianYang37"
+    - name: rss
+      url: "index.xml"
+
+  fuseOpts:
+    isCaseSensitive: false
+    shouldSort: true
+    location: 0
+    distance: 1000
+    threshold: 0.4
+    minMatchCharLength: 0
+    keys: ["title", "permalink", "summary", "content"]
+
+menu:
+  main:
+    - name: "← Homepage"
+      url: "https://christianyang37.github.io/"
+      weight: 1
+      params:
+        external: true
+    - name: "Posts"
+      url: "/posts/"
+      weight: 10
+    - name: "Archive"
+      url: "/archives/"
+      weight: 20
+    - name: "Tags"
+      url: "/tags/"
+      weight: 30
+    - name: "Search"
+      url: "/search/"
+      weight: 40

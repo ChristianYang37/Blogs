@@ -3,9 +3,6 @@ title: "Hello World — LaTeX Rendering Test"
 date: 2026-05-22
 draft: false
 math: true
-tags:
-  - meta
-  - latex
 categories:
   - misc
 summary: "First post — verifies KaTeX rendering of inline math, display math, matrices, and aligned equations."

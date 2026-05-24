@@ -37,7 +37,6 @@ markup:
 
 taxonomies:
   category: categories
-  tag: tags
 
 params:
   env: production
@@ -94,12 +93,6 @@ menu:
     - name: "Posts"
       url: "/posts/"
       weight: 10
-    - name: "Archive"
-      url: "/archives/"
-      weight: 20
-    - name: "Tags"
-      url: "/tags/"
-      weight: 30
     - name: "Search"
       url: "/search/"
       weight: 40

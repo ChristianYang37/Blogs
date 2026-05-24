@@ -87,8 +87,6 @@ languages:
       socialIcons:
         - name: github
           url: "https://github.com/ChristianYang37"
-        - name: rss
-          url: "index.xml"
     menu:
       main:
         - name: "← Homepage"
@@ -119,8 +117,6 @@ languages:
       socialIcons:
         - name: github
           url: "https://github.com/ChristianYang37"
-        - name: rss
-          url: "index.xml"
     menu:
       main:
         - name: "← 主页"

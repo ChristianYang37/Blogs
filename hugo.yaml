@@ -1,7 +1,7 @@
 baseURL: "https://christianyang37.github.io/Blogs/"
-title: "Christian's Blog"
 theme: "PaperModX"
 defaultContentLanguage: "en"
+defaultContentLanguageInSubdir: false
 enableRobotsTXT: true
 enableEmoji: true
 pagination:
@@ -38,10 +38,9 @@ markup:
 taxonomies:
   category: categories
 
+# Site-wide params (language-independent)
 params:
   env: production
-  description: "Notes on machine learning, AI safety, and deep learning theory."
-  author: "Chiwun Yang"
   mainSections:
     - posts
   defaultTheme: auto
@@ -57,22 +56,9 @@ params:
   EnableInstantClick: true
   EnableImageZoom: true
   DateFormat: "2006-01-02"
+  displayFullLangName: true
 
   math: true
-
-  homeInfoParams:
-    Title: "Hi, I'm Chiwun 👋"
-    Content: |
-      Welcome to my blog. I write about machine learning research, AI safety,
-      and deep learning theory.
-
-      ← Back to [my homepage](https://christianyang37.github.io/) for academic profile, publications, and CV.
-
-  socialIcons:
-    - name: github
-      url: "https://github.com/ChristianYang37"
-    - name: rss
-      url: "index.xml"
 
   fuseOpts:
     isCaseSensitive: false
@@ -83,16 +69,68 @@ params:
     minMatchCharLength: 0
     keys: ["title", "permalink", "summary", "content"]
 
-menu:
-  main:
-    - name: "← Homepage"
-      url: "https://christianyang37.github.io/"
-      weight: 1
-      params:
-        external: true
-    - name: "Posts"
-      url: "/posts/"
-      weight: 10
-    - name: "Search"
-      url: "/search/"
-      weight: 40
+languages:
+  en:
+    languageName: "English"
+    weight: 1
+    title: "Christian's Blog"
+    params:
+      description: "Notes on machine learning, AI safety, and deep learning theory."
+      author: "Chiwun Yang"
+      homeInfoParams:
+        Title: "Hi, I'm Chiwun 👋"
+        Content: |
+          Welcome to my blog. I write about machine learning research, AI safety,
+          and deep learning theory.
+
+          ← Back to [my homepage](https://christianyang37.github.io/) for academic profile, publications, and CV.
+      socialIcons:
+        - name: github
+          url: "https://github.com/ChristianYang37"
+        - name: rss
+          url: "index.xml"
+    menu:
+      main:
+        - name: "← Homepage"
+          url: "https://christianyang37.github.io/"
+          weight: 1
+          params:
+            external: true
+        - name: "Posts"
+          pageRef: "/posts/"
+          weight: 10
+        - name: "Search"
+          pageRef: "/search/"
+          weight: 40
+
+  zh:
+    languageName: "中文"
+    weight: 2
+    title: "Christian 的博客"
+    params:
+      description: "机器学习研究、AI 安全与深度学习理论方向的笔记。"
+      author: "Chiwun Yang"
+      homeInfoParams:
+        Title: "Hi，我是 Chiwun 👋"
+        Content: |
+          欢迎来到我的博客。这里写机器学习研究、AI 安全和深度学习理论方向的笔记。
+
+          ← 回到 [我的主页](https://christianyang37.github.io/) 看学术档案、论文列表和 CV。
+      socialIcons:
+        - name: github
+          url: "https://github.com/ChristianYang37"
+        - name: rss
+          url: "index.xml"
+    menu:
+      main:
+        - name: "← 主页"
+          url: "https://christianyang37.github.io/"
+          weight: 1
+          params:
+            external: true
+        - name: "文章"
+          pageRef: "/posts/"
+          weight: 10
+        - name: "搜索"
+          pageRef: "/search/"
+          weight: 40

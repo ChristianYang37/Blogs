@@ -3,13 +3,14 @@ title: "把推理过程当作优化：给 test-time scaling 一个具体速率"
 date: 2026-05-25T02:00:00+08:00
 math: true
 ---
-
-
 推理 LLM 在 `<think>` 和 `</think>` 之间多花算力、准确率随之上升——这件事从 OpenAI o1 和 DeepSeek R1 起家时还是发布会的核心卖点，到现在 GPT-5.5、Opus 4.7、Gemini 3.5、Qwen 3.6、Kimi K2.5 等等都默认带 thinking 模式，曲线已经从「卖点」变成「基本面」：没人再单独宣传它了，但每条产品线都还在跟着这条曲线走 ([Snell 2024](https://arxiv.org/abs/2408.03314); [OpenAI 2024](https://arxiv.org/abs/2412.16720); [DeepSeek 2025](https://arxiv.org/abs/2501.12948); [Muennighoff 2025](https://arxiv.org/abs/2501.19393))。问题反而更尖锐了——**这个速率到底是多少、由什么决定**？
 
 本文我们从一个具体的角度切入：固定 transformer 某一层、某一个注意力头，看 `</think>` 这个位置上的注意力输出随推理轨迹增长怎么演化。结论是：这个注意力输出在结构上就是一个**对所有已生成 token 的值向量做的 softmax 加权平均**。在对模型的一组温和条件下，它**指数级地收敛到正确答案对应向量的小邻域**——具体地，对任意推理步数 $T \ge 1$：
 
-$$\Pr[\text{fail}] \;\le\; 2\exp\!\Big(-\frac{p_0\, T}{8}\Big),$$
+$$
+\Pr[\text{fail}] \;\le\; 2\exp\!\Big(-\frac{p_0\, T}{8}\Big),
+
+$$
 
 其中 $p_0$ 是「答案相关 token 在每一步被生成的概率」的下界（下文细说）。
 
@@ -17,7 +18,7 @@ $$\Pr[\text{fail}] \;\le\; 2\exp\!\Big(-\frac{p_0\, T}{8}\Big),$$
 
 ## 一、先看看已有的视角
 
-文献里的回答主要有几条线。
+我们先看看 prior works 里的回答，主要有以下几条线：
 
 **思维链 ≈ 多步梯度下降**。[von Oswald 等 2022](https://arxiv.org/abs/2212.07677) 和 [Akyürek 等 2022](https://arxiv.org/abs/2211.15661) 证明线性自注意力加合适的权重，就能实现一步对上下文回归任务的梯度下降；近期 [Cheng 等 ICLR 2025](https://arxiv.org/abs/2502.21212) 进一步证明，思维链让单层 transformer 从一步回归升级到可证明的多步优化。这是「推理即优化」最干净的形式化版本——但停留在合成的上下文学习任务 + 训练时。
 
@@ -35,7 +36,10 @@ $$\Pr[\text{fail}] \;\le\; 2\exp\!\Big(-\frac{p_0\, T}{8}\Big),$$
 
 固定 transformer 任一层 $i$、任一注意力头 $h$。在任意位置 $p$，注意力头计算
 
-$$\mathrm{Attn}(q_p, K, V) \;=\; \sum_{k} \frac{\exp(q_p^\top k_k)}{\sum_l \exp(q_p^\top k_l)}\, V_k.$$
+$$
+\mathrm{Attn}(q_p, K, V) \;=\; \sum_{k} \frac{\exp(q_p^\top k_k)}{\sum_l \exp(q_p^\top k_l)}\, V_k.
+
+$$
 
 输出是值向量的凸组合，softmax 权重非负、和为 1。
 
@@ -47,27 +51,45 @@ $$\mathrm{Attn}(q_p, K, V) \;=\; \sum_{k} \frac{\exp(q_p^\top k_k)}{\sum_l \exp(
 
 从 $j-1$ 个推理 token 走到 $j$ 个。Softmax 分母由
 
-$$s_{j-1} \;=\; \sum_{k=1}^{j-1} \exp(q^\top k_k) \tag{1}$$
+$$
+s_{j-1} \;=\; \sum_{k=1}^{j-1} \exp(q^\top k_k) \tag{1}
+
+$$
 
 变成
 
-$$s_j \;=\; s_{j-1} + \exp(q^\top k_j). \tag{2}$$
+$$
+s_j \;=\; s_{j-1} + \exp(q^\top k_j). \tag{2}
+
+$$
 
 新的注意力输出是
 
-$$x_j \;=\; \sum_{k=1}^{j} \frac{\exp(q^\top k_k)}{s_j}\, V_k. \tag{3}$$
+$$
+x_j \;=\; \sum_{k=1}^{j} \frac{\exp(q^\top k_k)}{s_j}\, V_k. \tag{3}
+
+$$
 
 留意到这**不是**简单地在 $x_{j-1}$ 上加一项——分母 $s_j$ 比 $s_{j-1}$ 大，所有旧权重都被缩小了一个因子 $s_{j-1}/s_j < 1$：
 
-$$\frac{\exp(q^\top k_k)}{s_j} \;=\; \frac{s_{j-1}}{s_j} \cdot \frac{\exp(q^\top k_k)}{s_{j-1}}, \qquad k \le j-1.$$
+$$
+\frac{\exp(q^\top k_k)}{s_j} \;=\; \frac{s_{j-1}}{s_j} \cdot \frac{\exp(q^\top k_k)}{s_{j-1}}, \qquad k \le j-1.
+
+$$
 
 代回 (3)：
 
-$$x_j \;=\; \frac{s_{j-1}}{s_j} \underbrace{\sum_{k=1}^{j-1} \frac{\exp(q^\top k_k)}{s_{j-1}}\, V_k}_{=\, x_{j-1}} \;+\; \frac{\exp(q^\top k_j)}{s_j}\, V_j.$$
+$$
+x_j \;=\; \frac{s_{j-1}}{s_j} \underbrace{\sum_{k=1}^{j-1} \frac{\exp(q^\top k_k)}{s_{j-1}}\, V_k}_{=\, x_{j-1}} \;+\; \frac{\exp(q^\top k_j)}{s_j}\, V_j.
+
+$$
 
 定义衰减因子 $\lambda_j := 1 - s_{j-1}/s_j$、增量 $g_j := (\exp(q^\top k_j)/s_j)\, V_j$，整理得
 
-$$\boxed{\; x_j \;=\; (1 - \lambda_j)\, x_{j-1} \;+\; g_j. \;} \tag{4}$$
+$$
+\boxed{\; x_j \;=\; (1 - \lambda_j)\, x_{j-1} \;+\; g_j. \;} \tag{4}
+
+$$
 
 这就是注意力输出的「一步递推」。
 
@@ -85,15 +107,24 @@ $$\boxed{\; x_j \;=\; (1 - \lambda_j)\, x_{j-1} \;+\; g_j. \;} \tag{4}$$
 
 把 (4) 一路展开回 $x_0$。衰减因子的乘积可以折叠：
 
-$$\prod_{i=k+1}^{j} (1 - \lambda_i) \;=\; \prod_{i=k+1}^{j} \frac{s_{i-1}}{s_i} \;=\; \frac{s_k}{s_j}.$$
+$$
+\prod_{i=k+1}^{j} (1 - \lambda_i) \;=\; \prod_{i=k+1}^{j} \frac{s_{i-1}}{s_i} \;=\; \frac{s_k}{s_j}.
+
+$$
 
 所以 $g_k$ 在 $x_j$ 里的贡献是 $(s_k/s_j) \cdot g_k$。代回 $g_k = (\exp(q^\top k_k)/s_k)\, V_k$：
 
-$$\frac{s_k}{s_j} \cdot g_k \;=\; \frac{\exp(q^\top k_k)}{s_j}\, V_k \;=:\; w_{j,k}\, V_k.$$
+$$
+\frac{s_k}{s_j} \cdot g_k \;=\; \frac{\exp(q^\top k_k)}{s_j}\, V_k \;=:\; w_{j,k}\, V_k.
+
+$$
 
 对 $k$ 求和：
 
-$$\boxed{\; x_j \;=\; \sum_{k=1}^{j} w_{j,k}\, V_k, \qquad w_{j,k} \ge 0,\ \sum_k w_{j,k} = 1. \;} \tag{5}$$
+$$
+\boxed{\; x_j \;=\; \sum_{k=1}^{j} w_{j,k}\, V_k, \qquad w_{j,k} \ge 0,\ \sum_k w_{j,k} = 1. \;} \tag{5}
+
+$$
 
 事实上这就是原始的注意力公式本身。但递推 (4) 多告诉了我们一件事——**加权平均是怎么演化的**。每个新 token 把所有前面 token 的贡献按 $s_{j-1}/s_j$ 略微缩小，然后把自己加进去。
 
@@ -130,9 +161,11 @@ $$\boxed{\; x_j \;=\; \sum_{k=1}^{j} w_{j,k}\, V_k, \qquad w_{j,k} \ge 0,\ \sum_
 
 *为什么合理*：合理性检查。层归一化（layer normalization）直接保证。
 
-**C5（解码间隙）**。若 $\|x - V^*(Q)\| \le \gamma(Q)$，则 $\mathrm{decode}(x)$ 输出正确答案。$\gamma(Q)$ 是问题相关的解码间隙。
+**C5（解码间隙）**。若 $\|x - V^*(Q)\| \le \gamma(Q)$，则 $\mathrm{decode}(x)$ 输出正确答案。
 
-*为什么合理*：训练过的模型在 final-token logit 上有 margin。$\gamma(Q)$ 是这个 margin 的量化。我们把解码当成 black box，只要求这个间隙存在。
+*直观理解*：我们可以把 $V^*(Q)$ 想成问题 $Q$ 的正确答案在隐空间里的「理想位置」，$\gamma(Q)$ 就是绕着它的一个**容错半径**——只要解码前的向量 $x$ 落在以 $V^*(Q)$ 为圆心、$\gamma(Q)$ 为半径的小球里，模型最后还是会解出正确答案；走出这个球就可能解错。半径的大小完全取决于这道题本身：正确答案的 logit 比其它候选明显高出一截（题目「清楚」）→ $\gamma(Q)$ 大；几个候选 logit 差不多（题目「接近临界」），稍微一漂就跨过决策边界 → $\gamma(Q)$ 小。所以我们把它记成依赖于 $Q$ 的 $\gamma(Q)$。
+
+*为什么合理*：训练后的模型在 final-token logit 上总有 margin；这里要的只是把这个 margin 翻译成隐空间里的距离，不打开解码本身的箱子。
 
 前三条都是训练后模型推理行为的性质，三条都能从前向传播测得（不用看训练数据）。
 
@@ -142,13 +175,19 @@ $$\boxed{\; x_j \;=\; \sum_{k=1}^{j} w_{j,k}\, V_k, \qquad w_{j,k} \ge 0,\ \sum_
 
 **定理（Test-time scaling for anchored attention）**。在 C1–C5 和上述 $\Delta$ 条件下，对任意 $Q \in F$ 和任意推理步数 $T \ge 1$，
 
-$$\Pr\!\Big[\, \|x_T - V^*(Q)\| \le \tfrac{\gamma(Q)}{2} + \varepsilon_{\mathrm{anc}} \;\text{and}\; \mathrm{decode}(x_T) \in \mathrm{Correct}(Q) \,\Big] \;\ge\; 1 - 2\exp\!\Big(-\frac{p_0\, T}{8}\Big). \tag{6}$$
+$$
+\Pr\!\Big[\, \|x_T - V^*(Q)\| \le \tfrac{\gamma(Q)}{2} + \varepsilon_{\mathrm{anc}} \;\text{and}\; \mathrm{decode}(x_T) \in \mathrm{Correct}(Q) \,\Big] \;\ge\; 1 - 2\exp\!\Big(-\frac{p_0\, T}{8}\Big). \tag{6}
+
+$$
 
 失败概率沿推理时长指数衰减，速率 $p_0 / 8$ 完全由锚生成概率决定。
 
 两行从尾概率到期望的转换，给出期望误差的推论：
 
-$$\mathbb{E}\bigl[\|x_T - V^*(Q)\|\bigr] \;\le\; \tfrac{\gamma(Q)}{2} + \varepsilon_{\mathrm{anc}} \;+\; 2(M + \|V^*(Q)\|)\,\exp\!\Big(-\frac{p_0\, T}{8}\Big). \tag{7}$$
+$$
+\mathbb{E}\bigl[\|x_T - V^*(Q)\|\bigr] \;\le\; \tfrac{\gamma(Q)}{2} + \varepsilon_{\mathrm{anc}} \;+\; 2(M + \|V^*(Q)\|)\,\exp\!\Big(-\frac{p_0\, T}{8}\Big). \tag{7}
+
+$$
 
 这就是 test-time scaling 的形式——一个与 $T$ 无关的下界，加上随 $T$ 指数衰减的部分。
 
@@ -162,7 +201,10 @@ $$\mathbb{E}\bigl[\|x_T - V^*(Q)\|\bigr] \;\le\; \tfrac{\gamma(Q)}{2} + \varepsi
 
 定义指示变量 $X_j := \mathbf{1}\{a_j \in \mathcal{A}(Q)\}$，第 $j$ 步是不是锚。锚总数
 
-$$|\mathcal{A}^{\mathrm{traj}}_T| \;=\; \sum_{j=1}^T X_j.$$
+$$
+|\mathcal{A}^{\mathrm{traj}}_T| \;=\; \sum_{j=1}^T X_j.
+
+$$
 
 由 C2，条件期望 $p_j \ge p_0$，所以平均而言 $T$ 步里至少有 $p_0 T$ 个锚。实际实现当然会波动——我们需要一个高概率的下界。
 
@@ -170,13 +212,19 @@ $$|\mathcal{A}^{\mathrm{traj}}_T| \;=\; \sum_{j=1}^T X_j.$$
 
 需要的不等式（对鞅滤波下的条件 Bernoulli 之和，相对偏差 $\delta = 1/2$）：
 
-$$\Pr\!\Big[\sum_{j=1}^T X_j \le \tfrac{1}{2} \sum_{j=1}^T p_j\Big] \;\le\; \exp\!\Big(-\tfrac{1}{8} \sum_{j=1}^T p_j\Big). \tag{8}$$
+$$
+\Pr\!\Big[\sum_{j=1}^T X_j \le \tfrac{1}{2} \sum_{j=1}^T p_j\Big] \;\le\; \exp\!\Big(-\tfrac{1}{8} \sum_{j=1}^T p_j\Big). \tag{8}
+
+$$
 
 指数里的 $1/8 = \delta^2/2$ 取 $\delta = 1/2$。鞅版推广见 Freedman 1975 Theorem 1.6。
 
 代入 C2 给的 $\sum_j p_j \ge p_0 T$：
 
-$$\Pr\!\Big[\sum_j X_j \le \tfrac{p_0 T}{2}\Big] \;\le\; \exp\!\Big(-\frac{p_0\, T}{8}\Big).$$
+$$
+\Pr\!\Big[\sum_j X_j \le \tfrac{p_0 T}{2}\Big] \;\le\; \exp\!\Big(-\frac{p_0\, T}{8}\Big).
+
+$$
 
 记好事件 $\mathcal{E}_1 := \{|\mathcal{A}^{\mathrm{traj}}_T| \ge p_0 T / 2\}$，则 $\Pr[\mathcal{E}_1] \ge 1 - \exp(-p_0 T/8)$，且在 $\mathcal{E}_1$ 上锚总数 $\ge p_0 T / 2$。
 
@@ -188,11 +236,17 @@ $\mathcal{E}_1$ 上至少有 $p_0 T / 2$ 个锚。它们的 softmax 权重是 $w
 
 C3 给的是任意锚的得分 $\sigma_a$ 比任意非锚的得分 $\sigma_n$ 高至少 $\Delta$，即 $\exp(\sigma_n) \le e^{-\Delta} \exp(\sigma_a)$。非锚占的质量：
 
-$$1 - W_{\mathcal{A}}(T) \;=\; \frac{\sum_{k \notin \mathcal{A}^{\mathrm{traj}}_T} \exp(\sigma_k)}{\sum_k \exp(\sigma_k)} \;\le\; \frac{|\text{non-anchor}|}{|\text{anchor}|} \cdot e^{-\Delta}.$$
+$$
+1 - W_{\mathcal{A}}(T) \;=\; \frac{\sum_{k \notin \mathcal{A}^{\mathrm{traj}}_T} \exp(\sigma_k)}{\sum_k \exp(\sigma_k)} \;\le\; \frac{|\text{non-anchor}|}{|\text{anchor}|} \cdot e^{-\Delta}.
+
+$$
 
 $\mathcal{E}_1$ 上 $|\text{anchor}| \ge p_0 T / 2$、$|\text{non-anchor}| \le T$，所以
 
-$$1 - W_{\mathcal{A}}(T) \;\le\; \frac{2}{p_0}\, e^{-\Delta}. \tag{9}$$
+$$
+1 - W_{\mathcal{A}}(T) \;\le\; \frac{2}{p_0}\, e^{-\Delta}. \tag{9}
+
+$$
 
 **与 $T$ 无关**——这一部分是由 $\Delta$ 控制的，不是由推理时长控制的。
 
@@ -200,21 +254,33 @@ $$1 - W_{\mathcal{A}}(T) \;\le\; \frac{2}{p_0}\, e^{-\Delta}. \tag{9}$$
 
 把 $\|x_T - V^*(Q)\|$ 拆成锚的贡献 + 非锚的贡献。用 $\sum_k w_{T,k} = 1$：
 
-$$x_T - V^*(Q) \;=\; \sum_{k \in \mathcal{A}^{\mathrm{traj}}_T} w_{T,k}\, (V_k - V^*) \;+\; \sum_{k \notin \mathcal{A}^{\mathrm{traj}}_T} w_{T,k}\, (V_k - V^*).$$
+$$
+x_T - V^*(Q) \;=\; \sum_{k \in \mathcal{A}^{\mathrm{traj}}_T} w_{T,k}\, (V_k - V^*) \;+\; \sum_{k \notin \mathcal{A}^{\mathrm{traj}}_T} w_{T,k}\, (V_k - V^*).
+
+$$
 
 取范数、用三角不等式：
 
-$$\|x_T - V^*\| \;\le\; \underbrace{\sum_{k \in \mathcal{A}} w_{T,k}\, \|V_k - V^*\|}_{\text{anchor error}} + \underbrace{\sum_{k \notin \mathcal{A}} w_{T,k}\, \|V_k - V^*\|}_{\text{non-anchor leakage}}.$$
+$$
+\|x_T - V^*\| \;\le\; \underbrace{\sum_{k \in \mathcal{A}} w_{T,k}\, \|V_k - V^*\|}_{\text{anchor error}} + \underbrace{\sum_{k \notin \mathcal{A}} w_{T,k}\, \|V_k - V^*\|}_{\text{non-anchor leakage}}.
+
+$$
 
 由 C1，锚的误差 $\le \varepsilon_{\mathrm{anc}} \cdot W_{\mathcal{A}}(T) \le \varepsilon_{\mathrm{anc}}$。由 C4 + 三角，$\|V_k - V^*\| \le M + \|V^*\|$，所以非锚的泄漏 $\le (M + \|V^*\|) \cdot (1 - W_{\mathcal{A}}(T))$。
 
 合并 (9)：在 $\mathcal{E}_1$ 上
 
-$$\|x_T - V^*\| \;\le\; \varepsilon_{\mathrm{anc}} + \frac{2(M + \|V^*\|)}{p_0}\, e^{-\Delta}.$$
+$$
+\|x_T - V^*\| \;\le\; \varepsilon_{\mathrm{anc}} + \frac{2(M + \|V^*\|)}{p_0}\, e^{-\Delta}.
+
+$$
 
 定理表述里 $\Delta \ge \log(4(M + \max_Q \|V^*(Q)\|)/(p_0\, \gamma_{\min}))$ 这个条件，两边取对数整理就能验证它恰好把第二项压到 $\gamma(Q)/2$ 以下。所以
 
-$$\|x_T - V^*\| \;\le\; \varepsilon_{\mathrm{anc}} + \gamma(Q)/2 \qquad \text{on } \mathcal{E}_1.$$
+$$
+\|x_T - V^*\| \;\le\; \varepsilon_{\mathrm{anc}} + \gamma(Q)/2 \qquad \text{on } \mathcal{E}_1.
+
+$$
 
 由 C5，解码正确。
 
@@ -235,7 +301,13 @@ $$\|x_T - V^*\| \;\le\; \varepsilon_{\mathrm{anc}} + \gamma(Q)/2 \qquad \text{on
 
 最直接的经验对应是 Choi 等 2025 看到的熵 plateau。Plateau 在哪里来？稍微一想：下一个 token 的 logit 是 $W_U x_T$（解嵌入作用在加权平均上），所以 softmax 的熵是 $x_T$ 的 Lipschitz 函数。把 $\|x_T - V^*(Q)\|$ 的 bound 通过 Lipschitz 复合推过去，得到熵衰减的推论：
 
-$$\mathbb{E}\bigl[|H_T - H_\infty(Q)|\bigr] \;\le\; L_{\mathrm{sm}}\, B_U \cdot \bigl(\gamma(Q)/2 + \varepsilon_{\mathrm{anc}}\bigr) + 2 L_{\mathrm{sm}}\, B_U\, (M + \|V^*(Q)\|)\, \exp(-p_0 T / 8). \tag{10}$$
+$$
+\begin{aligned}
+\mathbb{E}\bigl[|H_T - H_\infty(Q)|\bigr] \;\le\;{}& L_{\mathrm{sm}}\, B_U \cdot \bigl(\gamma(Q)/2 + \varepsilon_{\mathrm{anc}}\bigr) \\
+& {}+ 2 L_{\mathrm{sm}}\, B_U\, (M + \|V^*(Q)\|)\, \exp(-p_0 T / 8).
+\end{aligned} \tag{10}
+
+$$
 
 其中 $L_{\mathrm{sm}}$ 是 $\mathbf{x} \mapsto H(\mathrm{softmax}(\mathbf{x}))$ 的 Lipschitz 常数、$B_U$ 是解嵌入矩阵的算子范数上界。熵沿同样的指数速率 $\exp(-p_0 T/8)$ 收敛到一个由模型决定的下界。
 
@@ -249,11 +321,17 @@ Choi 拿来做提前退出的那个 plateau，正是这条收敛的经验信号�
 
 指数中的 $p_0 T$ 是紧的。构造一下：在一个对抗性问题 $Q^*$ 上，模型每一步以**恰好** $p_0$ 概率生成锚、和历史独立（Bernoulli 独立同分布）。事件 "$T$ 步里一个锚都没生成" 的概率是
 
-$$\Pr[|\mathcal{A}^{\mathrm{traj}}_T| = 0] \;=\; (1 - p_0)^T.$$
+$$
+\Pr[|\mathcal{A}^{\mathrm{traj}}_T| = 0] \;=\; (1 - p_0)^T.
+
+$$
 
 这个事件上，加权平均在锚 token 上的 softmax 质量为 0、整个质量跑去非锚 token，距 $V^*(Q^*)$ $\ge \gamma(Q^*)$——掉在解码间隙外，解码出错：
 
-$$\Pr[\mathrm{decode}(x_T) \notin \mathrm{Correct}(Q^*)] \;\ge\; (1-p_0)^T \;\ge\; \exp(-T \log(1/(1-p_0))). \tag{11}$$
+$$
+\Pr[\mathrm{decode}(x_T) \notin \mathrm{Correct}(Q^*)] \;\ge\; (1-p_0)^T \;\ge\; \exp(-T \log(1/(1-p_0))). \tag{11}
+
+$$
 
 小 $p_0$ 时 $\log(1/(1-p_0)) \approx p_0$，下界 $\approx \exp(-p_0 T)$。上界是 $\exp(-p_0 T / 8)$。**指数 match 到常数 8**——指数里的 $p_0 T$ 就是对的速率（up to 常数）。
 
@@ -265,17 +343,26 @@ $$\Pr[\mathrm{decode}(x_T) \notin \mathrm{Correct}(Q^*)] \;\ge\; (1-p_0)^T \;\ge
 
 **C1'（锚的无偏性）**：锚的值向量是 $V^*(Q)$ 的无偏估计、方差有界——
 
-$$\mathbb{E}[V(k_a) \mid a \in \mathcal{A}(Q)] = V^*(Q), \qquad \mathbb{E}\|V(k_a) - V^*(Q)\|^2 \le \sigma^2.$$
+$$
+\mathbb{E}[V(k_a) \mid a \in \mathcal{A}(Q)] = V^*(Q), \qquad \mathbb{E}\|V(k_a) - V^*(Q)\|^2 \le \sigma^2.
+
+$$
 
 这比 C1 严格强：原来的逐点界被换成「期望为零」这个条件。再加一个温和的「锚内部均匀」假设（锚 token 之间的 softmax 得分间隙由某个 $\Delta'$ 控制，避免某一个锚单独垄断锚集合上的 softmax 质量）。
 
 然后「平均估计的方差」这个老套路就奏效了：$\Omega(p_0 T)$ 个无偏锚值向量平均起来，平方误差按 $1/T$ 衰减。具体地：
 
-$$\mathbb{E}\bigl[\|x_T - V^*(Q)\|^2\bigr] \;\le\; \frac{4 e^{\Delta'} \sigma^2}{p_0\, T} + 2(M + \|V^*(Q)\|)^2 \exp\!\Big(-\frac{p_0 T}{8}\Big). \tag{12}$$
+$$
+\mathbb{E}\bigl[\|x_T - V^*(Q)\|^2\bigr] \;\le\; \frac{4 e^{\Delta'} \sigma^2}{p_0\, T} + 2(M + \|V^*(Q)\|)^2 \exp\!\Big(-\frac{p_0 T}{8}\Big). \tag{12}
+
+$$
 
 Jensen 开根号：
 
-$$\mathbb{E}\|x_T - V^*(Q)\| \;\le\; \frac{2 e^{\Delta'/2} \sigma}{\sqrt{p_0 T}} \;+\; \sqrt{2}\,(M + \|V^*(Q)\|)\, \exp\!\Big(-\frac{p_0 T}{16}\Big).$$
+$$
+\mathbb{E}\|x_T - V^*(Q)\| \;\le\; \frac{2 e^{\Delta'/2} \sigma}{\sqrt{p_0 T}} \;+\; \sqrt{2}\,(M + \|V^*(Q)\|)\, \exp\!\Big(-\frac{p_0 T}{16}\Big).
+
+$$
 
 **下界本身按 $1/\sqrt{T}$ 衰减**了。这是「多思考让我更确信我答对了」和「多思考让我的答案本身更准」的区别——前者是 confidence scaling，后者是 accuracy scaling。
 
@@ -294,9 +381,7 @@ $$\mathbb{E}\|x_T - V^*(Q)\| \;\le\; \frac{2 e^{\Delta'/2} \sigma}{\sqrt{p_0 T}}
 **三个可证伪的预测**（不需要重训）：
 
 1. **Pass@1 vs. $T$ 的形状**。从一个 held-out trajectory 子集估 $p_0$（数 anchor 生成频率）和 $\Delta$（读 softmax 后的权重）。代入 $\exp(-p_0 T/8)$。预测的是*定性形状*——速率 $p_0/8$ 的指数衰减加一个 question-dependent 的下界——而不是指数前面的绝对常数。
-
 2. **Entropy plateau 的速率**。Choi 等 2025 观察到 `</think>` 上 next-token softmax 的 entropy 随 $T$ 增长进入 plateau。entropy-decay 推论预测这个 plateau 的逼近速率正是 $\exp(-p_0 T/8)$。两边都测，应当 up to 常数 agree。
-
 3. **每个问题不同的下界**。两个难度相当但 anchor 密度不同的问题 $Q_1, Q_2$（比如单数字答案 vs. 多 token 的表达式），应当展现平行的指数衰减（共享 $p_0$）+ 不同的渐近线（不同的 $\gamma(Q_i)/2 + \varepsilon_{\mathrm{anc}}$ 下界）。
 
 **三个诚实的 caveat**。5 条条件是充分非必要——一条不成立不等于 scaling 不成立，只是这个证明不再保证。定理 bound 的是落在 decoding margin 内的*概率*；它对推理 trace 是否"忠实"于产出的答案保持沉默（一个事后合理化的模型仍可能满足定理）。policy 在我们这里被当成 fixed；现实中 RL 训练本身就让 $p_0$ 增长。一个完整的 test-time scaling 账本需要同时有这套 within-inference 分析 + 一套 training-time 分析（$p_0$ 怎么涨）。
@@ -315,6 +400,6 @@ $$\mathbb{E}\|x_T - V^*(Q)\| \;\le\; \frac{2 e^{\Delta'/2} \sigma}{\sqrt{p_0 T}}
 
 ## 收尾
 
-上面这份证明——3 个定理、2 个推论、7 条引理、讨论章节、所有假设、引用 digest、置信度 trace、5 轮自评——是用一个叫 `dlt-proof-writing` 的 Agent Skill 端到端起草的。我自己花时间的地方是这篇 post 上面在做的事——找结构、挑假设；剩下的 bookkeeping 都跑在 skill 的 pipeline 里。Skill 的机制以及它具体自动化了什么，在配套 post 里：[Introducing dlt-proof-writing]({{< ref "posts/02-introducing-dlt-proof-writing" >}})。
+上面这份证明——3 个定理、2 个推论、7 条引理、讨论章节、所有假设、引用 digest、置信度 trace、5 轮 self-review——是用一个叫 `dlt-proof-writing` 的 Agent Skill 端到端起草的。我自己花时间的地方是这篇 post 上面在做的事——找结构、挑假设；剩下的 bookkeeping 都跑在 skill 的 pipeline 里。Skill 的机制以及它具体自动化了什么，在我的下一篇 blog 里：[Introducing dlt-proof-writing]({{< ref "posts/02-introducing-dlt-proof-writing" >}})。
 
 完整 PDF（含所有常数、引理证明、3 个定理的形式陈述、讨论章节）：[01-reasoning-as-optimization.pdf](https://github.com/ChristianYang37/DLT-Proof-Writing-Skill/blob/main/eval_results/08-reasoning-as-optimization/pdf/main.pdf)。GitHub 源码（作为 dlt-proof-writing 的第 8 个 eval）：[`08-reasoning-as-optimization/`](https://github.com/ChristianYang37/DLT-Proof-Writing-Skill/tree/main/eval_results/08-reasoning-as-optimization)。

@@ -287,7 +287,10 @@ The exponential rate $\exp(-p_0 T / 8)$ is the test-time analogue of training-ti
 
 The most direct empirical prediction is for [Choi et al. 2025](https://arxiv.org/abs/2509.26522). They observe that the next-token entropy at the `</think>` position decreases and plateaus with thinking length. Where does that plateau come from? A short calculation pins it down: the next-token logits are $W_U x_T$ (unembedding applied to our running average), so the entropy of the resulting softmax distribution is a Lipschitz function of $x_T$. Pushing the $\|x_T - V^*(Q)\|$ bound through the Lipschitz composition gives an entropy-decay corollary:
 
-$$\mathbb{E}\bigl[\,|H_T - H_\infty(Q)|\,\bigr] \;\le\; L_{\mathrm{sm}}\, B_U \cdot \bigl(\gamma(Q)/2 + \varepsilon_{\mathrm{anc}}\bigr) + 2 L_{\mathrm{sm}}\, B_U\, (M + \|V^*(Q)\|)\, \exp(-p_0 T / 8),$$
+$$\begin{aligned}
+\mathbb{E}\bigl[\,|H_T - H_\infty(Q)|\,\bigr] \;\le\;{}& L_{\mathrm{sm}}\, B_U \cdot \bigl(\gamma(Q)/2 + \varepsilon_{\mathrm{anc}}\bigr) \\
+& {}+ 2 L_{\mathrm{sm}}\, B_U\, (M + \|V^*(Q)\|)\, \exp(-p_0 T / 8),
+\end{aligned}$$
 
 where $L_{\mathrm{sm}}$ is the Lipschitz constant of $\mathbf{x} \mapsto H(\mathrm{softmax}(\mathbf{x}))$ and $B_U$ bounds the operator norm of the unembedding matrix. The entropy converges to a model-dependent floor at the same exponential rate $\exp(-p_0 T / 8)$. The plateau Choi et al. threshold for early exit is the empirical signature of this convergence; the rate above predicts how quickly it should appear.
 
